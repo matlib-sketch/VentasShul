@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Plus, Minus, Trash2, ChevronLeft,
   Calendar, ShoppingBag, Send,
-  Check, Pencil, Download, BarChart3, Package,
+  Check, Pencil, Download, BarChart3, Package, Tag,
 } from 'lucide-react';
 
 // ============================================================
@@ -111,7 +111,7 @@ function IngredientForm({ ingredient, onSave, onClose }) {
   const [unit, setUnit]               = useState(ingredient.unit         || 'kg');
   const [pricePerUnit, setPricePerUnit] = useState(ingredient.pricePerUnit || '');
 
-  const valid = name.trim() && pricePerUnit;
+  const valid = name.trim();
 
   return (
     <Modal onClose={onClose}>
@@ -189,16 +189,21 @@ function IngredientForm({ ingredient, onSave, onClose }) {
 // ============================================================
 // FORMULARIO DE PRODUCTO (con sección de receta)
 // ============================================================
-function ProductForm({ product, ingredients, initialRecipe, onSave, onClose }) {
+function ProductForm({ product, ingredients, initialRecipe, onSave, onClose, onFindOrCreateIngredient }) {
   const [name,  setName]  = useState(product.name  || '');
   const [price, setPrice] = useState(product.price || '');
   const [emoji, setEmoji] = useState(product.emoji || '🍽️');
 
-  // estado de receta
-  const [portions,     setPortions]     = useState(initialRecipe?.portions?.toString() || '');
-  const [recipeItems,  setRecipeItems]  = useState(initialRecipe?.items || []);
-  const [addIngId,     setAddIngId]     = useState('');
-  const [addIngQty,    setAddIngQty]    = useState('');
+  // estado de receta — items incluyen { ingredientId, name, qty } (name para display inmediato)
+  const [portions,    setPortions]    = useState(initialRecipe?.portions?.toString() || '');
+  const [recipeItems, setRecipeItems] = useState(
+    (initialRecipe?.items || []).map((item) => {
+      const ing = ingredients.find((i) => i.id === item.ingredientId);
+      return { ...item, name: ing?.name || '' };
+    })
+  );
+  const [addIngName, setAddIngName] = useState('');
+  const [addIngQty,  setAddIngQty]  = useState('');
 
   const totalCost = recipeItems.reduce((sum, item) => {
     const ing = ingredients.find((i) => i.id === item.ingredientId);
@@ -210,18 +215,24 @@ function ProductForm({ product, ingredients, initialRecipe, onSave, onClose }) {
   const margin = priceNum > 0 && costPerPortion > 0
     ? ((priceNum - costPerPortion) / priceNum * 100)
     : null;
+  const someWithoutPrice = recipeItems.some((item) => {
+    const ing = ingredients.find((i) => i.id === item.ingredientId);
+    return !ing || !ing.pricePerUnit;
+  });
 
   function addIngToRecipe() {
-    if (!addIngId || !addIngQty || Number(addIngQty) <= 0) return;
-    const idx = recipeItems.findIndex((i) => i.ingredientId === addIngId);
+    const trimmed = addIngName.trim();
+    if (!trimmed || !addIngQty || Number(addIngQty) <= 0) return;
+    const ingredientId = onFindOrCreateIngredient(trimmed);
+    const idx = recipeItems.findIndex((i) => i.ingredientId === ingredientId);
     if (idx >= 0) {
       const updated = [...recipeItems];
       updated[idx] = { ...updated[idx], qty: updated[idx].qty + Number(addIngQty) };
       setRecipeItems(updated);
     } else {
-      setRecipeItems([...recipeItems, { ingredientId: addIngId, qty: Number(addIngQty) }]);
+      setRecipeItems([...recipeItems, { ingredientId, name: trimmed, qty: Number(addIngQty) }]);
     }
-    setAddIngId('');
+    setAddIngName('');
     setAddIngQty('');
   }
 
@@ -230,7 +241,7 @@ function ProductForm({ product, ingredients, initialRecipe, onSave, onClose }) {
   }
 
   const recipeData = recipeItems.length > 0 && portionsNum > 0
-    ? { portions: portionsNum, items: recipeItems }
+    ? { portions: portionsNum, items: recipeItems.map(({ ingredientId, qty }) => ({ ingredientId, qty })) }
     : null;
 
   const canSave = name.trim() && price;
@@ -284,143 +295,143 @@ function ProductForm({ product, ingredients, initialRecipe, onSave, onClose }) {
 
       {/* ── SECCIÓN RECETA ── */}
       <div style={{ borderTop: `2px solid ${C.border}` }} className="pt-4 mt-2">
-        <h3 style={{ fontFamily: SERIF, color: C.ink, fontWeight: 600 }} className="text-lg mb-3">
-          Receta y costos <span style={{ color: C.inkLight, fontFamily: SANS, fontWeight: 400, fontSize: '0.85rem' }}>(opcional)</span>
+        <h3 style={{ fontFamily: SERIF, color: C.ink, fontWeight: 600 }} className="text-lg mb-1">
+          Receta <span style={{ color: C.inkLight, fontFamily: SANS, fontWeight: 400, fontSize: '0.85rem' }}>(opcional)</span>
         </h3>
+        <p style={{ color: C.inkLight, fontFamily: SANS, fontSize: '0.82rem' }} className="mb-3">
+          Ingresá los ingredientes y cantidades. Los precios se toman de la pestaña <b>Precios</b>.
+        </p>
 
-        {ingredients.length === 0 ? (
-          <p style={{ color: C.inkLight, fontFamily: SANS }} className="text-sm p-3 rounded-xl" style2={{ background: C.bg }}>
-            Primero crea ingredientes en la pestaña <b>Ingredientes</b> para poder armar una receta.
-          </p>
-        ) : (
-          <>
-            <label style={{ color: C.ink, fontFamily: SANS }} className="block text-sm mb-1 font-semibold">
-              Porciones que rinde esta receta
-            </label>
-            <input
-              type="number"
-              value={portions}
-              onChange={(e) => setPortions(e.target.value)}
-              placeholder="Ej: 10"
-              className="w-full rounded-xl border-2 p-3 text-base outline-none mb-4"
-              style={{ borderColor: C.border, fontFamily: SANS, color: C.ink }}
-            />
+        <label style={{ color: C.ink, fontFamily: SANS }} className="block text-sm mb-1 font-semibold">
+          Porciones que rinde esta receta
+        </label>
+        <input
+          type="number"
+          value={portions}
+          onChange={(e) => setPortions(e.target.value)}
+          placeholder="Ej: 10"
+          className="w-full rounded-xl border-2 p-3 text-base outline-none mb-4"
+          style={{ borderColor: C.border, fontFamily: SANS, color: C.ink }}
+        />
 
-            {/* ingredientes ya agregados */}
-            {recipeItems.length > 0 && (
-              <div className="mb-3 space-y-2">
-                {recipeItems.map((item) => {
-                  const ing = ingredients.find((i) => i.id === item.ingredientId);
-                  if (!ing) return null;
-                  return (
-                    <div
-                      key={item.ingredientId}
-                      className="flex items-center gap-2 p-3 rounded-xl"
-                      style={{ background: C.bg, border: `1px solid ${C.border}` }}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <span style={{ color: C.ink, fontFamily: SANS, fontWeight: 600 }}>
-                          {ing.name}
-                        </span>
-                        <span style={{ color: C.inkLight, fontFamily: SANS }} className="ml-2 text-sm">
-                          {item.qty} {ing.unit} · {formatCLP(ing.pricePerUnit * item.qty)}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => removeIngFromRecipe(item.ingredientId)}
-                        className="p-2 rounded-lg flex-shrink-0"
-                        style={{ background: '#FBEEEC' }}
-                        aria-label="Quitar ingrediente"
-                      >
-                        <Trash2 size={15} style={{ color: C.danger }} />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* agregar ingrediente */}
-            <div className="flex gap-2 mb-4">
-              <select
-                value={addIngId}
-                onChange={(e) => setAddIngId(e.target.value)}
-                className="flex-1 rounded-xl border-2 p-2 text-sm outline-none"
-                style={{ borderColor: C.border, fontFamily: SANS, color: C.ink, background: C.card }}
-              >
-                <option value="">Ingrediente…</option>
-                {ingredients
-                  .filter((i) => !recipeItems.find((r) => r.ingredientId === i.id))
-                  .map((i) => (
-                    <option key={i.id} value={i.id}>
-                      {i.name} ({i.unit})
-                    </option>
-                  ))}
-              </select>
-              <input
-                type="number"
-                value={addIngQty}
-                onChange={(e) => setAddIngQty(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') addIngToRecipe(); }}
-                placeholder="Cant."
-                className="w-24 rounded-xl border-2 p-2 text-sm outline-none"
-                style={{ borderColor: C.border, fontFamily: SANS, color: C.ink }}
-              />
-              <button
-                onClick={addIngToRecipe}
-                className="px-3 rounded-xl flex items-center justify-center"
-                style={{
-                  background: addIngId && addIngQty ? C.accent : '#CCCCCC',
-                  color: 'white',
-                }}
-                aria-label="Agregar"
-              >
-                <Plus size={20} />
-              </button>
-            </div>
-
-            {/* resumen de costos */}
-            {recipeItems.length > 0 && portionsNum > 0 && (
-              <div
-                className="rounded-xl p-4"
-                style={{ background: '#EFF7F3', border: `1px solid #AEDAD0` }}
-              >
-                <div className="flex justify-between items-center mb-2">
-                  <span style={{ color: C.ink, fontFamily: SANS }} className="text-sm">
-                    Costo total receta
-                  </span>
-                  <span style={{ color: C.ink, fontFamily: SERIF, fontWeight: 700 }}>
-                    {formatCLP(totalCost)}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center mb-2" style={{ borderTop: `1px solid #AEDAD0`, paddingTop: '8px' }}>
-                  <span style={{ color: C.ink, fontFamily: SANS }} className="text-sm font-semibold">
-                    Costo por porción
-                  </span>
-                  <span style={{ color: C.accent, fontFamily: SERIF, fontWeight: 700 }} className="text-xl">
-                    {formatCLP(costPerPortion)}
-                  </span>
-                </div>
-                {margin !== null && (
-                  <div className="flex justify-between items-center">
-                    <span style={{ color: C.ink, fontFamily: SANS }} className="text-sm font-semibold">
-                      Margen de ganancia
+        {/* ingredientes ya en la receta */}
+        {recipeItems.length > 0 && (
+          <div className="mb-3 space-y-2">
+            {recipeItems.map((item) => {
+              const ing = ingredients.find((i) => i.id === item.ingredientId);
+              const displayName = ing?.name || item.name || '—';
+              const displayUnit = ing?.unit || '';
+              return (
+                <div
+                  key={item.ingredientId}
+                  className="flex items-center gap-2 p-3 rounded-xl"
+                  style={{ background: C.bg, border: `1px solid ${C.border}` }}
+                >
+                  <div className="flex-1 min-w-0">
+                    <span style={{ color: C.ink, fontFamily: SANS, fontWeight: 600 }}>
+                      {displayName}
                     </span>
-                    <span
-                      style={{
-                        fontFamily: SERIF,
-                        fontWeight: 700,
-                        fontSize: '1.15rem',
-                        color: margin >= 0 ? C.success : C.danger,
-                      }}
-                    >
-                      {margin.toFixed(1)}%
+                    <span style={{ color: C.inkLight, fontFamily: SANS }} className="ml-2 text-sm">
+                      {item.qty}{displayUnit ? ` ${displayUnit}` : ''}
                     </span>
                   </div>
-                )}
+                  <button
+                    onClick={() => removeIngFromRecipe(item.ingredientId)}
+                    className="p-2 rounded-lg flex-shrink-0"
+                    style={{ background: '#FBEEEC' }}
+                    aria-label="Quitar ingrediente"
+                  >
+                    <Trash2 size={15} style={{ color: C.danger }} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* agregar ingrediente con texto libre + autocompletado */}
+        <datalist id="ing-suggestions">
+          {ingredients
+            .filter((i) => !recipeItems.find((r) => r.ingredientId === i.id))
+            .map((i) => <option key={i.id} value={i.name} />)}
+        </datalist>
+        <div className="flex gap-2 mb-4">
+          <input
+            list="ing-suggestions"
+            value={addIngName}
+            onChange={(e) => setAddIngName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') addIngToRecipe(); }}
+            placeholder="Nombre del ingrediente…"
+            className="flex-1 rounded-xl border-2 p-2 text-sm outline-none"
+            style={{ borderColor: C.border, fontFamily: SANS, color: C.ink }}
+          />
+          <input
+            type="number"
+            value={addIngQty}
+            onChange={(e) => setAddIngQty(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') addIngToRecipe(); }}
+            placeholder="Cant."
+            className="w-24 rounded-xl border-2 p-2 text-sm outline-none"
+            style={{ borderColor: C.border, fontFamily: SANS, color: C.ink }}
+          />
+          <button
+            onClick={addIngToRecipe}
+            className="px-3 rounded-xl flex items-center justify-center"
+            style={{
+              background: addIngName.trim() && addIngQty ? C.accent : '#CCCCCC',
+              color: 'white',
+            }}
+            aria-label="Agregar"
+          >
+            <Plus size={20} />
+          </button>
+        </div>
+
+        {/* resumen de costos */}
+        {recipeItems.length > 0 && portionsNum > 0 && (
+          <div
+            className="rounded-xl p-4"
+            style={{ background: '#EFF7F3', border: `1px solid #AEDAD0` }}
+          >
+            <div className="flex justify-between items-center mb-2">
+              <span style={{ color: C.ink, fontFamily: SANS }} className="text-sm">
+                Costo total receta
+              </span>
+              <span style={{ color: C.ink, fontFamily: SERIF, fontWeight: 700 }}>
+                {formatCLP(totalCost)}
+              </span>
+            </div>
+            <div className="flex justify-between items-center mb-2" style={{ borderTop: `1px solid #AEDAD0`, paddingTop: '8px' }}>
+              <span style={{ color: C.ink, fontFamily: SANS }} className="text-sm font-semibold">
+                Costo por porción
+              </span>
+              <span style={{ color: C.accent, fontFamily: SERIF, fontWeight: 700 }} className="text-xl">
+                {formatCLP(costPerPortion)}
+              </span>
+            </div>
+            {margin !== null && (
+              <div className="flex justify-between items-center">
+                <span style={{ color: C.ink, fontFamily: SANS }} className="text-sm font-semibold">
+                  Margen de ganancia
+                </span>
+                <span
+                  style={{
+                    fontFamily: SERIF,
+                    fontWeight: 700,
+                    fontSize: '1.15rem',
+                    color: margin >= 0 ? C.success : C.danger,
+                  }}
+                >
+                  {margin.toFixed(1)}%
+                </span>
               </div>
             )}
-          </>
+            {someWithoutPrice && (
+              <p style={{ color: C.inkLight, fontFamily: SANS, fontSize: '0.78rem' }} className="mt-2">
+                * Algunos ingredientes no tienen precio en la pestaña Precios — se cuentan como $0.
+              </p>
+            )}
+          </div>
         )}
       </div>
 
@@ -671,6 +682,15 @@ export default function POSShul() {
     persistOrders(orders.map((o) => o.id === currentOrder.id ? updated : o));
     setPaidOrder(updated);
     setView('success');
+  }
+
+  function findOrCreateIngredient(name) {
+    const normalized = name.trim().toLowerCase();
+    const existing = ingredients.find((i) => i.name.toLowerCase() === normalized);
+    if (existing) return existing.id;
+    const newIng = { id: uid(), name: name.trim(), unit: 'unidad', pricePerUnit: 0 };
+    persistIngredients([...ingredients, newIng]);
+    return newIng.id;
   }
 
   function saveProduct(productData, recipeData) {
@@ -1209,7 +1229,7 @@ export default function POSShul() {
             {[
               { id: 'summary',     label: 'Resumen',      icon: BarChart3   },
               { id: 'products',    label: 'Productos',    icon: ShoppingBag },
-              { id: 'ingredients', label: 'Ingredientes', icon: Package     },
+              { id: 'ingredients', label: 'Precios',       icon: Tag         },
               { id: 'history',     label: 'Historial',    icon: Calendar    },
             ].map((t) => {
               const Icon   = t.icon;
@@ -1452,23 +1472,28 @@ export default function POSShul() {
           {/* tab: ingredientes */}
           {adminTab === 'ingredients' && (
             <>
-              <button
-                onClick={() => setEditingIngredient({ id: null, name: '', unit: 'kg', pricePerUnit: '' })}
-                className="mb-4 px-4 py-3 rounded-xl flex items-center gap-2"
-                style={{ background: C.accent2, color: 'white', fontFamily: SANS, fontWeight: 600 }}
-              >
-                <Plus size={20} />
-                Agregar ingrediente
-              </button>
+              <div className="mb-4">
+                <p style={{ color: C.inkLight, fontFamily: SANS, fontSize: '0.88rem' }} className="mb-3">
+                  Acá configurás el precio de cada insumo. En la receta de cada producto solo ponés las cantidades — el app calcula el costo automáticamente.
+                </p>
+                <button
+                  onClick={() => setEditingIngredient({ id: null, name: '', unit: 'kg', pricePerUnit: '' })}
+                  className="px-4 py-3 rounded-xl flex items-center gap-2"
+                  style={{ background: C.accent2, color: 'white', fontFamily: SANS, fontWeight: 600 }}
+                >
+                  <Plus size={20} />
+                  Agregar insumo
+                </button>
+              </div>
 
               {ingredients.length === 0 ? (
                 <div
                   className="rounded-2xl p-8 text-center"
                   style={{ background: C.card, color: C.inkLight, fontFamily: SANS, border: `1px solid ${C.border}` }}
                 >
-                  <Package size={40} style={{ color: C.border, margin: '0 auto 12px' }} />
-                  <p>No hay ingredientes aún.</p>
-                  <p className="text-sm mt-1">Agrega los insumos que usás en tus recetas y su precio por unidad.</p>
+                  <Tag size={40} style={{ color: C.border, margin: '0 auto 12px' }} />
+                  <p>No hay insumos aún.</p>
+                  <p className="text-sm mt-1">Agregá los insumos con su precio por unidad. También se crean solos cuando los usás en una receta.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1492,8 +1517,9 @@ export default function POSShul() {
                           <div style={{ color: C.ink, fontFamily: SANS, fontWeight: 600 }} className="text-lg truncate">
                             {ing.name}
                           </div>
-                          <div style={{ color: C.accent2, fontFamily: SERIF, fontWeight: 700 }}>
-                            {formatCLP(ing.pricePerUnit)}<span style={{ color: C.inkLight, fontFamily: SANS, fontWeight: 400, fontSize: '0.85rem' }}>/{ing.unit}</span>
+                          <div style={{ color: ing.pricePerUnit ? C.accent2 : C.inkLight, fontFamily: SERIF, fontWeight: 700 }}>
+                            {ing.pricePerUnit ? formatCLP(ing.pricePerUnit) : 'Sin precio'}
+                            <span style={{ color: C.inkLight, fontFamily: SANS, fontWeight: 400, fontSize: '0.85rem' }}>/{ing.unit}</span>
                           </div>
                           {usedInRecipes > 0 && (
                             <div style={{ color: C.inkLight, fontFamily: SANS }} className="text-xs">
@@ -1618,6 +1644,7 @@ export default function POSShul() {
             initialRecipe={recipes.find((r) => r.productId === editingProduct.id) || null}
             onSave={saveProduct}
             onClose={() => setEditingProduct(null)}
+            onFindOrCreateIngredient={findOrCreateIngredient}
           />
         )}
 
