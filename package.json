@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "start": "serve dist -l $PORT"
+    "start": "serve dist --listen 3000 --no-clipboard"
   },
   "dependencies": {
     "lucide-react": "^1.16.0",
