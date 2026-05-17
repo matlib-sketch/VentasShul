@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Plus, Minus, Trash2, ChevronLeft,
   Calendar, ShoppingBag, Send,
-  Check, Pencil, Download, BarChart3,
+  Check, Pencil, Download, BarChart3, Package,
 } from 'lucide-react';
 
 // ============================================================
@@ -53,6 +53,13 @@ const COMMON_EMOJIS = [
   '🥯','🥙','🌯','🥖','🧀','🍪','🍯','🥧','🍇','🥒','🍅','🫒','🍽️','✨',
 ];
 
+const UNITS = [
+  { id: 'kg',     label: 'kg'    },
+  { id: 'L',      label: 'L'     },
+  { id: 'g',      label: 'g'     },
+  { id: 'unidad', label: 'unid.' },
+];
+
 // ============================================================
 // HELPERS
 // ============================================================
@@ -64,7 +71,6 @@ const formatDateTime = (iso) => new Date(iso).toLocaleString('es-CL', {
 const calcTotal = (items) => items.reduce((s, i) => s + i.price * i.qty, 0);
 const uid = () => 'id_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
-// localStorage helpers (replacing window.storage)
 function loadKey(key, defaultVal) {
   try {
     const raw = localStorage.getItem(key);
@@ -79,7 +85,7 @@ function saveKey(key, val) {
 // ============================================================
 // MODAL GENÉRICO
 // ============================================================
-function Modal({ children, onClose }) {
+function Modal({ children, onClose, wide }) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -87,7 +93,7 @@ function Modal({ children, onClose }) {
       onClick={onClose}
     >
       <div
-        className="rounded-2xl p-6 max-w-md w-full shadow-2xl"
+        className={`rounded-2xl p-6 ${wide ? 'max-w-lg' : 'max-w-md'} w-full shadow-2xl max-h-[90vh] overflow-y-auto`}
         style={{ background: C.card }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -98,15 +104,139 @@ function Modal({ children, onClose }) {
 }
 
 // ============================================================
-// FORMULARIO DE PRODUCTO (admin)
+// FORMULARIO DE INGREDIENTE
 // ============================================================
-function ProductForm({ product, onSave, onClose }) {
+function IngredientForm({ ingredient, onSave, onClose }) {
+  const [name, setName]               = useState(ingredient.name         || '');
+  const [unit, setUnit]               = useState(ingredient.unit         || 'kg');
+  const [pricePerUnit, setPricePerUnit] = useState(ingredient.pricePerUnit || '');
+
+  const valid = name.trim() && pricePerUnit;
+
+  return (
+    <Modal onClose={onClose}>
+      <h2 style={{ fontFamily: SERIF, color: C.ink }} className="text-2xl mb-4 font-bold">
+        {ingredient.id ? 'Editar ingrediente' : 'Agregar ingrediente'}
+      </h2>
+
+      <label style={{ color: C.ink, fontFamily: SANS }} className="block text-base mb-1 font-semibold">
+        Nombre
+      </label>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Ej: Garbanzo, Harina, Aceite..."
+        className="w-full rounded-xl border-2 p-3 text-lg outline-none mb-4"
+        style={{ borderColor: C.border, fontFamily: SANS, color: C.ink }}
+        autoFocus
+      />
+
+      <label style={{ color: C.ink, fontFamily: SANS }} className="block text-base mb-2 font-semibold">
+        Unidad de medida
+      </label>
+      <div className="flex gap-2 mb-4">
+        {UNITS.map((u) => (
+          <button
+            key={u.id}
+            onClick={() => setUnit(u.id)}
+            className="flex-1 py-3 rounded-xl font-semibold text-base"
+            style={{
+              background: unit === u.id ? C.accent : C.bg,
+              color:      unit === u.id ? 'white'  : C.ink,
+              border:     `2px solid ${unit === u.id ? C.accent : C.border}`,
+              fontFamily: SANS,
+            }}
+          >
+            {u.label}
+          </button>
+        ))}
+      </div>
+
+      <label style={{ color: C.ink, fontFamily: SANS }} className="block text-base mb-1 font-semibold">
+        Precio por {unit} (CLP)
+      </label>
+      <input
+        type="number"
+        value={pricePerUnit}
+        onChange={(e) => setPricePerUnit(e.target.value)}
+        placeholder="Ej: 1200"
+        className="w-full rounded-xl border-2 p-3 text-lg outline-none mb-5"
+        style={{ borderColor: C.border, fontFamily: SANS, color: C.ink }}
+      />
+
+      <div className="flex gap-3">
+        <button
+          onClick={onClose}
+          className="flex-1 rounded-xl py-4 text-lg font-semibold"
+          style={{ background: C.warm, color: C.ink, fontFamily: SANS }}
+        >
+          Cancelar
+        </button>
+        <button
+          onClick={() => {
+            if (valid) onSave({ id: ingredient.id, name: name.trim(), unit, pricePerUnit: Number(pricePerUnit) });
+          }}
+          className="flex-1 rounded-xl py-4 text-lg font-semibold"
+          style={{ background: valid ? C.accent2 : '#CCCCCC', color: 'white', fontFamily: SANS }}
+        >
+          Guardar
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ============================================================
+// FORMULARIO DE PRODUCTO (con sección de receta)
+// ============================================================
+function ProductForm({ product, ingredients, initialRecipe, onSave, onClose }) {
   const [name,  setName]  = useState(product.name  || '');
   const [price, setPrice] = useState(product.price || '');
   const [emoji, setEmoji] = useState(product.emoji || '🍽️');
 
+  // estado de receta
+  const [portions,     setPortions]     = useState(initialRecipe?.portions?.toString() || '');
+  const [recipeItems,  setRecipeItems]  = useState(initialRecipe?.items || []);
+  const [addIngId,     setAddIngId]     = useState('');
+  const [addIngQty,    setAddIngQty]    = useState('');
+
+  const totalCost = recipeItems.reduce((sum, item) => {
+    const ing = ingredients.find((i) => i.id === item.ingredientId);
+    return sum + (ing ? ing.pricePerUnit * item.qty : 0);
+  }, 0);
+  const portionsNum    = Number(portions) || 0;
+  const costPerPortion = portionsNum > 0 ? totalCost / portionsNum : 0;
+  const priceNum       = Number(price) || 0;
+  const margin = priceNum > 0 && costPerPortion > 0
+    ? ((priceNum - costPerPortion) / priceNum * 100)
+    : null;
+
+  function addIngToRecipe() {
+    if (!addIngId || !addIngQty || Number(addIngQty) <= 0) return;
+    const idx = recipeItems.findIndex((i) => i.ingredientId === addIngId);
+    if (idx >= 0) {
+      const updated = [...recipeItems];
+      updated[idx] = { ...updated[idx], qty: updated[idx].qty + Number(addIngQty) };
+      setRecipeItems(updated);
+    } else {
+      setRecipeItems([...recipeItems, { ingredientId: addIngId, qty: Number(addIngQty) }]);
+    }
+    setAddIngId('');
+    setAddIngQty('');
+  }
+
+  function removeIngFromRecipe(ingredientId) {
+    setRecipeItems(recipeItems.filter((i) => i.ingredientId !== ingredientId));
+  }
+
+  const recipeData = recipeItems.length > 0 && portionsNum > 0
+    ? { portions: portionsNum, items: recipeItems }
+    : null;
+
+  const canSave = name.trim() && price;
+
   return (
-    <Modal onClose={onClose}>
+    <Modal onClose={onClose} wide>
       <h2 style={{ fontFamily: SERIF, color: C.ink }} className="text-2xl mb-4 font-bold">
         {product.id ? 'Editar producto' : 'Agregar producto'}
       </h2>
@@ -123,7 +253,7 @@ function ProductForm({ product, onSave, onClose }) {
       />
 
       <label style={{ color: C.ink, fontFamily: SANS }} className="block text-base mb-1 font-semibold">
-        Precio (CLP)
+        Precio de venta (CLP)
       </label>
       <input
         type="number"
@@ -152,7 +282,149 @@ function ProductForm({ product, onSave, onClose }) {
         ))}
       </div>
 
-      <div className="flex gap-3">
+      {/* ── SECCIÓN RECETA ── */}
+      <div style={{ borderTop: `2px solid ${C.border}` }} className="pt-4 mt-2">
+        <h3 style={{ fontFamily: SERIF, color: C.ink, fontWeight: 600 }} className="text-lg mb-3">
+          Receta y costos <span style={{ color: C.inkLight, fontFamily: SANS, fontWeight: 400, fontSize: '0.85rem' }}>(opcional)</span>
+        </h3>
+
+        {ingredients.length === 0 ? (
+          <p style={{ color: C.inkLight, fontFamily: SANS }} className="text-sm p-3 rounded-xl" style2={{ background: C.bg }}>
+            Primero crea ingredientes en la pestaña <b>Ingredientes</b> para poder armar una receta.
+          </p>
+        ) : (
+          <>
+            <label style={{ color: C.ink, fontFamily: SANS }} className="block text-sm mb-1 font-semibold">
+              Porciones que rinde esta receta
+            </label>
+            <input
+              type="number"
+              value={portions}
+              onChange={(e) => setPortions(e.target.value)}
+              placeholder="Ej: 10"
+              className="w-full rounded-xl border-2 p-3 text-base outline-none mb-4"
+              style={{ borderColor: C.border, fontFamily: SANS, color: C.ink }}
+            />
+
+            {/* ingredientes ya agregados */}
+            {recipeItems.length > 0 && (
+              <div className="mb-3 space-y-2">
+                {recipeItems.map((item) => {
+                  const ing = ingredients.find((i) => i.id === item.ingredientId);
+                  if (!ing) return null;
+                  return (
+                    <div
+                      key={item.ingredientId}
+                      className="flex items-center gap-2 p-3 rounded-xl"
+                      style={{ background: C.bg, border: `1px solid ${C.border}` }}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <span style={{ color: C.ink, fontFamily: SANS, fontWeight: 600 }}>
+                          {ing.name}
+                        </span>
+                        <span style={{ color: C.inkLight, fontFamily: SANS }} className="ml-2 text-sm">
+                          {item.qty} {ing.unit} · {formatCLP(ing.pricePerUnit * item.qty)}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => removeIngFromRecipe(item.ingredientId)}
+                        className="p-2 rounded-lg flex-shrink-0"
+                        style={{ background: '#FBEEEC' }}
+                        aria-label="Quitar ingrediente"
+                      >
+                        <Trash2 size={15} style={{ color: C.danger }} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* agregar ingrediente */}
+            <div className="flex gap-2 mb-4">
+              <select
+                value={addIngId}
+                onChange={(e) => setAddIngId(e.target.value)}
+                className="flex-1 rounded-xl border-2 p-2 text-sm outline-none"
+                style={{ borderColor: C.border, fontFamily: SANS, color: C.ink, background: C.card }}
+              >
+                <option value="">Ingrediente…</option>
+                {ingredients
+                  .filter((i) => !recipeItems.find((r) => r.ingredientId === i.id))
+                  .map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.name} ({i.unit})
+                    </option>
+                  ))}
+              </select>
+              <input
+                type="number"
+                value={addIngQty}
+                onChange={(e) => setAddIngQty(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') addIngToRecipe(); }}
+                placeholder="Cant."
+                className="w-24 rounded-xl border-2 p-2 text-sm outline-none"
+                style={{ borderColor: C.border, fontFamily: SANS, color: C.ink }}
+              />
+              <button
+                onClick={addIngToRecipe}
+                className="px-3 rounded-xl flex items-center justify-center"
+                style={{
+                  background: addIngId && addIngQty ? C.accent : '#CCCCCC',
+                  color: 'white',
+                }}
+                aria-label="Agregar"
+              >
+                <Plus size={20} />
+              </button>
+            </div>
+
+            {/* resumen de costos */}
+            {recipeItems.length > 0 && portionsNum > 0 && (
+              <div
+                className="rounded-xl p-4"
+                style={{ background: '#EFF7F3', border: `1px solid #AEDAD0` }}
+              >
+                <div className="flex justify-between items-center mb-2">
+                  <span style={{ color: C.ink, fontFamily: SANS }} className="text-sm">
+                    Costo total receta
+                  </span>
+                  <span style={{ color: C.ink, fontFamily: SERIF, fontWeight: 700 }}>
+                    {formatCLP(totalCost)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center mb-2" style={{ borderTop: `1px solid #AEDAD0`, paddingTop: '8px' }}>
+                  <span style={{ color: C.ink, fontFamily: SANS }} className="text-sm font-semibold">
+                    Costo por porción
+                  </span>
+                  <span style={{ color: C.accent, fontFamily: SERIF, fontWeight: 700 }} className="text-xl">
+                    {formatCLP(costPerPortion)}
+                  </span>
+                </div>
+                {margin !== null && (
+                  <div className="flex justify-between items-center">
+                    <span style={{ color: C.ink, fontFamily: SANS }} className="text-sm font-semibold">
+                      Margen de ganancia
+                    </span>
+                    <span
+                      style={{
+                        fontFamily: SERIF,
+                        fontWeight: 700,
+                        fontSize: '1.15rem',
+                        color: margin >= 0 ? C.success : C.danger,
+                      }}
+                    >
+                      {margin.toFixed(1)}%
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="flex gap-3 mt-5">
         <button
           onClick={onClose}
           className="flex-1 rounded-xl py-4 text-lg font-semibold"
@@ -162,13 +434,16 @@ function ProductForm({ product, onSave, onClose }) {
         </button>
         <button
           onClick={() => {
-            if (name.trim() && price) {
-              onSave({ id: product.id, name: name.trim(), price: Number(price), emoji });
+            if (canSave) {
+              onSave(
+                { id: product.id, name: name.trim(), price: Number(price), emoji },
+                recipeData,
+              );
             }
           }}
           className="flex-1 rounded-xl py-4 text-lg font-semibold"
           style={{
-            background: name.trim() && price ? C.accent2 : '#CCCCCC',
+            background: canSave ? C.accent2 : '#CCCCCC',
             color: 'white',
             fontFamily: SANS,
           }}
@@ -248,8 +523,8 @@ function CustomItemDialog({ onSave, onClose }) {
 // COMPONENTE PRINCIPAL
 // ============================================================
 export default function POSShul() {
-  const [view, setView]               = useState('home'); // home | order | pay | success | admin
-  const [adminTab, setAdminTab]       = useState('summary'); // summary | products | history
+  const [view, setView]               = useState('home');
+  const [adminTab, setAdminTab]       = useState('summary');
   const [products, setProducts]       = useState([]);
   const [orders, setOrders]           = useState([]);
   const [nextNum, setNextNum]         = useState(1);
@@ -257,29 +532,39 @@ export default function POSShul() {
   const [loading, setLoading]         = useState(true);
   const [paidOrder, setPaidOrder]     = useState(null);
 
+  // ingredientes y recetas
+  const [ingredients, setIngredients] = useState([]);
+  const [recipes, setRecipes]         = useState([]);
+
   // diálogos
   const [showNewOrder, setShowNewOrder]           = useState(false);
   const [newOrderName, setNewOrderName]           = useState('');
   const [showCustom, setShowCustom]               = useState(false);
   const [editingProduct, setEditingProduct]       = useState(null);
-  const [confirmDeleteOrder, setConfirmDeleteOrder]     = useState(null);
-  const [confirmDeleteProduct, setConfirmDeleteProduct] = useState(null);
+  const [editingIngredient, setEditingIngredient] = useState(null);
+  const [confirmDeleteOrder, setConfirmDeleteOrder]         = useState(null);
+  const [confirmDeleteProduct, setConfirmDeleteProduct]     = useState(null);
+  const [confirmDeleteIngredient, setConfirmDeleteIngredient] = useState(null);
 
   // filtros admin
   const [fromDate, setFromDate] = useState(todayISO());
   const [toDate,   setToDate]   = useState(todayISO());
 
-  // --- carga inicial (localStorage) ---
+  // --- carga inicial ---
   useEffect(() => {
     const prods = loadKey('shul_products', null) ?? (() => {
       saveKey('shul_products', DEFAULT_PRODUCTS);
       return DEFAULT_PRODUCTS;
     })();
-    const ords = loadKey('shul_orders', []);
-    const n    = loadKey('shul_nextNum', 1);
+    const ords  = loadKey('shul_orders',      []);
+    const n     = loadKey('shul_nextNum',     1);
+    const ings  = loadKey('shul_ingredients', []);
+    const recs  = loadKey('shul_recipes',     []);
     setProducts(prods);
     setOrders(ords);
     setNextNum(n);
+    setIngredients(ings);
+    setRecipes(recs);
     setLoading(false);
   }, []);
 
@@ -301,9 +586,22 @@ export default function POSShul() {
   }, [orders, fromDate, toDate]);
 
   // --- persistencia ---
-  function persistOrders(next)   { setOrders(next);   saveKey('shul_orders',   next); }
-  function persistProducts(next) { setProducts(next); saveKey('shul_products', next); }
-  function persistNum(n)         { setNextNum(n);     saveKey('shul_nextNum',  n);    }
+  function persistOrders(next)      { setOrders(next);       saveKey('shul_orders',      next); }
+  function persistProducts(next)    { setProducts(next);     saveKey('shul_products',    next); }
+  function persistNum(n)            { setNextNum(n);         saveKey('shul_nextNum',     n);    }
+  function persistIngredients(next) { setIngredients(next);  saveKey('shul_ingredients', next); }
+  function persistRecipes(next)     { setRecipes(next);      saveKey('shul_recipes',     next); }
+
+  // --- helper: costo por porción de un producto ---
+  function costForProduct(productId) {
+    const recipe = recipes.find((r) => r.productId === productId);
+    if (!recipe || recipe.portions <= 0) return null;
+    const totalCost = recipe.items.reduce((sum, item) => {
+      const ing = ingredients.find((i) => i.id === item.ingredientId);
+      return sum + (ing ? ing.pricePerUnit * item.qty : 0);
+    }, 0);
+    return totalCost / recipe.portions;
+  }
 
   // --- acciones ---
   function createOrder() {
@@ -375,6 +673,23 @@ export default function POSShul() {
     setView('success');
   }
 
+  function saveProduct(productData, recipeData) {
+    let productId = productData.id;
+    if (productId) {
+      persistProducts(products.map((p) => (p.id === productId ? productData : p)));
+    } else {
+      productId = uid();
+      persistProducts([...products, { ...productData, id: productId }]);
+    }
+    const otherRecipes = recipes.filter((r) => r.productId !== productId);
+    if (recipeData) {
+      persistRecipes([...otherRecipes, { ...recipeData, productId }]);
+    } else {
+      persistRecipes(otherRecipes);
+    }
+    setEditingProduct(null);
+  }
+
   function sendWhatsApp(order) {
     const customerLine = order.customerName ? ` · ${order.customerName}` : '';
     const lines = [
@@ -425,7 +740,6 @@ export default function POSShul() {
   // ============================================================
   // SUB-COMPONENTES DE LAYOUT
   // ============================================================
-
   function Header({ title, onBack, right }) {
     return (
       <div
@@ -736,7 +1050,6 @@ export default function POSShul() {
           )}
         </div>
 
-        {/* barra fija inferior */}
         <div
           className="fixed bottom-0 left-0 right-0 p-4 shadow-2xl"
           style={{ background: C.card, borderTop: `1px solid ${C.border}` }}
@@ -894,9 +1207,10 @@ export default function POSShul() {
           {/* tabs */}
           <div className="flex gap-2 mb-5 overflow-x-auto">
             {[
-              { id: 'summary',  label: 'Resumen',   icon: BarChart3   },
-              { id: 'products', label: 'Productos',  icon: ShoppingBag },
-              { id: 'history',  label: 'Historial',  icon: Calendar    },
+              { id: 'summary',     label: 'Resumen',      icon: BarChart3   },
+              { id: 'products',    label: 'Productos',    icon: ShoppingBag },
+              { id: 'ingredients', label: 'Ingredientes', icon: Package     },
+              { id: 'history',     label: 'Historial',    icon: Calendar    },
             ].map((t) => {
               const Icon   = t.icon;
               const active = adminTab === t.id;
@@ -1071,39 +1385,58 @@ export default function POSShul() {
                 Agregar producto
               </button>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {products.map((p) => (
-                  <div
-                    key={p.id}
-                    className="rounded-xl p-4 flex items-center gap-3 shadow-sm"
-                    style={{ background: C.card, border: `1px solid ${C.border}` }}
-                  >
-                    <span className="text-4xl">{p.emoji}</span>
-                    <div className="flex-1 min-w-0">
-                      <div style={{ color: C.ink, fontFamily: SANS, fontWeight: 600 }} className="text-lg truncate">
-                        {p.name}
+                {products.map((p) => {
+                  const cost   = costForProduct(p.id);
+                  const margin = cost !== null && p.price > 0
+                    ? ((p.price - cost) / p.price * 100)
+                    : null;
+                  return (
+                    <div
+                      key={p.id}
+                      className="rounded-xl p-4 flex items-center gap-3 shadow-sm"
+                      style={{ background: C.card, border: `1px solid ${C.border}` }}
+                    >
+                      <span className="text-4xl">{p.emoji}</span>
+                      <div className="flex-1 min-w-0">
+                        <div style={{ color: C.ink, fontFamily: SANS, fontWeight: 600 }} className="text-lg truncate">
+                          {p.name}
+                        </div>
+                        <div style={{ color: C.accent2, fontFamily: SERIF, fontWeight: 700 }} className="text-lg">
+                          {formatCLP(p.price)}
+                        </div>
+                        {cost !== null && (
+                          <div style={{ color: C.inkLight, fontFamily: SANS }} className="text-xs mt-0.5">
+                            Costo: {formatCLP(cost)}/porción
+                            {margin !== null && (
+                              <span
+                                className="ml-2 font-semibold"
+                                style={{ color: margin >= 0 ? C.success : C.danger }}
+                              >
+                                · {margin.toFixed(0)}% margen
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <div style={{ color: C.accent2, fontFamily: SERIF, fontWeight: 700 }} className="text-lg">
-                        {formatCLP(p.price)}
-                      </div>
+                      <button
+                        onClick={() => setEditingProduct(p)}
+                        className="p-3 rounded-lg"
+                        style={{ background: C.warm }}
+                        aria-label="Editar"
+                      >
+                        <Pencil size={18} style={{ color: C.ink }} />
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteProduct(p)}
+                        className="p-3 rounded-lg"
+                        style={{ background: '#FBEEEC' }}
+                        aria-label="Eliminar"
+                      >
+                        <Trash2 size={18} style={{ color: C.danger }} />
+                      </button>
                     </div>
-                    <button
-                      onClick={() => setEditingProduct(p)}
-                      className="p-3 rounded-lg"
-                      style={{ background: C.warm }}
-                      aria-label="Editar"
-                    >
-                      <Pencil size={18} style={{ color: C.ink }} />
-                    </button>
-                    <button
-                      onClick={() => setConfirmDeleteProduct(p)}
-                      className="p-3 rounded-lg"
-                      style={{ background: '#FBEEEC' }}
-                      aria-label="Eliminar"
-                    >
-                      <Trash2 size={18} style={{ color: C.danger }} />
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               {products.length === 0 && (
                 <div
@@ -1111,6 +1444,82 @@ export default function POSShul() {
                   style={{ background: C.warm, color: C.ink, fontFamily: SANS }}
                 >
                   No hay productos. Tocá <b>Agregar producto</b> para crear el primero.
+                </div>
+              )}
+            </>
+          )}
+
+          {/* tab: ingredientes */}
+          {adminTab === 'ingredients' && (
+            <>
+              <button
+                onClick={() => setEditingIngredient({ id: null, name: '', unit: 'kg', pricePerUnit: '' })}
+                className="mb-4 px-4 py-3 rounded-xl flex items-center gap-2"
+                style={{ background: C.accent2, color: 'white', fontFamily: SANS, fontWeight: 600 }}
+              >
+                <Plus size={20} />
+                Agregar ingrediente
+              </button>
+
+              {ingredients.length === 0 ? (
+                <div
+                  className="rounded-2xl p-8 text-center"
+                  style={{ background: C.card, color: C.inkLight, fontFamily: SANS, border: `1px solid ${C.border}` }}
+                >
+                  <Package size={40} style={{ color: C.border, margin: '0 auto 12px' }} />
+                  <p>No hay ingredientes aún.</p>
+                  <p className="text-sm mt-1">Agrega los insumos que usás en tus recetas y su precio por unidad.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {ingredients.map((ing) => {
+                    const usedInRecipes = recipes.filter((r) =>
+                      r.items.some((item) => item.ingredientId === ing.id)
+                    ).length;
+                    return (
+                      <div
+                        key={ing.id}
+                        className="rounded-xl p-4 flex items-center gap-3 shadow-sm"
+                        style={{ background: C.card, border: `1px solid ${C.border}` }}
+                      >
+                        <div
+                          className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+                          style={{ background: C.warm }}
+                        >
+                          <Package size={22} style={{ color: C.accent }} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div style={{ color: C.ink, fontFamily: SANS, fontWeight: 600 }} className="text-lg truncate">
+                            {ing.name}
+                          </div>
+                          <div style={{ color: C.accent2, fontFamily: SERIF, fontWeight: 700 }}>
+                            {formatCLP(ing.pricePerUnit)}<span style={{ color: C.inkLight, fontFamily: SANS, fontWeight: 400, fontSize: '0.85rem' }}>/{ing.unit}</span>
+                          </div>
+                          {usedInRecipes > 0 && (
+                            <div style={{ color: C.inkLight, fontFamily: SANS }} className="text-xs">
+                              Usado en {usedInRecipes} {usedInRecipes === 1 ? 'receta' : 'recetas'}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => setEditingIngredient(ing)}
+                          className="p-3 rounded-lg"
+                          style={{ background: C.warm }}
+                          aria-label="Editar"
+                        >
+                          <Pencil size={18} style={{ color: C.ink }} />
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteIngredient(ing)}
+                          className="p-3 rounded-lg"
+                          style={{ background: '#FBEEEC' }}
+                          aria-label="Eliminar"
+                        >
+                          <Trash2 size={18} style={{ color: C.danger }} />
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </>
@@ -1201,21 +1610,34 @@ export default function POSShul() {
           )}
         </div>
 
+        {/* modal editar producto (con receta) */}
         {editingProduct && (
           <ProductForm
             product={editingProduct}
-            onSave={(data) => {
-              if (data.id) {
-                persistProducts(products.map((p) => (p.id === data.id ? data : p)));
-              } else {
-                persistProducts([...products, { ...data, id: uid() }]);
-              }
-              setEditingProduct(null);
-            }}
+            ingredients={ingredients}
+            initialRecipe={recipes.find((r) => r.productId === editingProduct.id) || null}
+            onSave={saveProduct}
             onClose={() => setEditingProduct(null)}
           />
         )}
 
+        {/* modal editar ingrediente */}
+        {editingIngredient && (
+          <IngredientForm
+            ingredient={editingIngredient}
+            onSave={(data) => {
+              if (data.id) {
+                persistIngredients(ingredients.map((i) => (i.id === data.id ? data : i)));
+              } else {
+                persistIngredients([...ingredients, { ...data, id: uid() }]);
+              }
+              setEditingIngredient(null);
+            }}
+            onClose={() => setEditingIngredient(null)}
+          />
+        )}
+
+        {/* confirm eliminar producto */}
         {confirmDeleteProduct && (
           <Modal onClose={() => setConfirmDeleteProduct(null)}>
             <h2 style={{ fontFamily: SERIF, color: C.ink, fontWeight: 700 }} className="text-2xl mb-2">
@@ -1234,8 +1656,46 @@ export default function POSShul() {
               </button>
               <button
                 onClick={() => {
-                  persistProducts(products.filter((p) => p.id !== confirmDeleteProduct.id));
+                  const id = confirmDeleteProduct.id;
+                  persistProducts(products.filter((p) => p.id !== id));
+                  persistRecipes(recipes.filter((r) => r.productId !== id));
                   setConfirmDeleteProduct(null);
+                }}
+                className="flex-1 rounded-xl py-4 text-lg font-semibold"
+                style={{ background: C.danger, color: 'white', fontFamily: SANS }}
+              >
+                Sí, eliminar
+              </button>
+            </div>
+          </Modal>
+        )}
+
+        {/* confirm eliminar ingrediente */}
+        {confirmDeleteIngredient && (
+          <Modal onClose={() => setConfirmDeleteIngredient(null)}>
+            <h2 style={{ fontFamily: SERIF, color: C.ink, fontWeight: 700 }} className="text-2xl mb-2">
+              ¿Eliminar ingrediente?
+            </h2>
+            <p style={{ color: C.inkLight, fontFamily: SANS }} className="text-base mb-5">
+              Se eliminará <b>{confirmDeleteIngredient.name}</b>. También se quitará de todas las recetas donde se use.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmDeleteIngredient(null)}
+                className="flex-1 rounded-xl py-4 text-lg font-semibold"
+                style={{ background: C.warm, color: C.ink, fontFamily: SANS }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  const id = confirmDeleteIngredient.id;
+                  persistIngredients(ingredients.filter((i) => i.id !== id));
+                  persistRecipes(recipes.map((r) => ({
+                    ...r,
+                    items: r.items.filter((item) => item.ingredientId !== id),
+                  })));
+                  setConfirmDeleteIngredient(null);
                 }}
                 className="flex-1 rounded-xl py-4 text-lg font-semibold"
                 style={{ background: C.danger, color: 'white', fontFamily: SANS }}
