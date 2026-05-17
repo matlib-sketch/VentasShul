@@ -1,9 +1,10 @@
 import { createServer } from 'http'
-import { readFileSync, existsSync } from 'fs'
+import { readFileSync, existsSync, statSync } from 'fs'
 import { join, extname } from 'path'
 
 const PORT = process.env.PORT || 3000
 const DIST = new URL('./dist', import.meta.url).pathname
+const INDEX = join(DIST, 'index.html')
 
 const mime = {
   '.html': 'text/html; charset=utf-8',
@@ -19,13 +20,25 @@ const mime = {
   '.woff2': 'font/woff2',
 }
 
+function resolveFile(reqUrl) {
+  const candidate = join(DIST, reqUrl.split('?')[0])
+  if (!candidate.startsWith(DIST)) return INDEX
+  if (!existsSync(candidate)) return INDEX
+  if (statSync(candidate).isDirectory()) return INDEX
+  return candidate
+}
+
 createServer((req, res) => {
-  let filePath = join(DIST, req.url.split('?')[0])
-  if (!existsSync(filePath) || filePath === DIST) filePath = join(DIST, 'index.html')
-  const ext = extname(filePath)
-  const type = mime[ext] || 'application/octet-stream'
-  res.writeHead(200, { 'Content-Type': type })
-  res.end(readFileSync(filePath))
+  try {
+    const filePath = resolveFile(req.url)
+    const type = mime[extname(filePath)] || 'application/octet-stream'
+    res.writeHead(200, { 'Content-Type': type })
+    res.end(readFileSync(filePath))
+  } catch (err) {
+    console.error('Request error:', err)
+    res.writeHead(500, { 'Content-Type': 'text/plain' })
+    res.end('Internal Server Error')
+  }
 }).listen(PORT, '0.0.0.0', () => {
   console.log(`Server listening on port ${PORT}`)
 })
